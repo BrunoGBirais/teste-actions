@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     # Selects which set of secrets the job sees. This is what keeps dev changes
     # away from production: the same secret names hold different values per environment.
-    environment: dev
+    environment: development
 
     steps:
       - uses: actions/checkout@v4
