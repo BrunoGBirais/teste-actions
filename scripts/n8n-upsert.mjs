@@ -8,6 +8,15 @@
 // between dev and prod. A file is matched by its "id" first and by its exact
 // "name" second; the name is the key that stays stable across instances.
 //
+// Placeholders: per-environment values are written in the JSON as __NAME__
+// (e.g. __SUPABASE_URL__) and filled from the env var N8N_VAR_NAME before the
+// workflow is sent. A file using a placeholder with no value fails.
+//
+// Credentials: exported node credentials carry the source instance's ids. Each
+// one is re-pointed to the credential with the same name and type on the target
+// instance, so credentials only need to exist there with matching names. This
+// needs the credential:list API scope.
+//
 // Errors: one bad file does not stop the others. Every file is attempted, the
 // report lists each result, and the script exits 1 if any file failed.
 import { appendFileSync, readdirSync, readFileSync } from "node:fs";
@@ -49,17 +58,51 @@ async function api(method, path, body) {
   return text ? JSON.parse(text) : {};
 }
 
-async function listRemote() {
+async function listAll(resource) {
   const all = [];
   let cursor;
   do {
     const query = new URLSearchParams({ limit: "250" });
     if (cursor) query.set("cursor", cursor);
-    const page = await api("GET", `/workflows?${query}`);
+    const page = await api("GET", `/${resource}?${query}`);
     all.push(...page.data);
     cursor = page.nextCursor;
   } while (cursor);
   return all;
+}
+
+// Fills __NAME__ placeholders from N8N_VAR_NAME. Values are JSON-escaped since
+// they land inside JSON strings.
+function fillPlaceholders(text) {
+  const missing = new Set();
+  const out = text.replace(/__([A-Z][A-Z0-9_]*)__/g, (match, name) => {
+    const value = process.env[`N8N_VAR_${name}`];
+    if (value === undefined || value === "") {
+      missing.add(name);
+      return match;
+    }
+    return JSON.stringify(value).slice(1, -1);
+  });
+  if (missing.size) {
+    const names = [...missing].map((n) => `N8N_VAR_${n}`).join(", ");
+    throw new Error(`no value for placeholder(s): set ${names} for this environment`);
+  }
+  return out;
+}
+
+// Re-points each node credential to the target instance's credential with the
+// same type and name. `credentials` is null when the instance can't list them.
+function remapCredentials(wf, credentials) {
+  const missing = [];
+  for (const node of wf.nodes) {
+    for (const [type, ref] of Object.entries(node.credentials ?? {})) {
+      if (!credentials) throw new Error(`can't map credentials: ${credentialsError}`);
+      const match = credentials.filter((c) => c.type === type && c.name === ref.name);
+      if (match.length === 1) node.credentials[type] = { id: match[0].id, name: match[0].name };
+      else missing.push(`"${ref.name}" (${type})${match.length > 1 ? ": more than one with this name" : ""}`);
+    }
+  }
+  if (missing.length) throw new Error(`credentials missing on this instance: ${[...new Set(missing)].join(", ")}`);
 }
 
 function toPayload(wf) {
@@ -68,9 +111,10 @@ function toPayload(wf) {
   return { name: wf.name, nodes: wf.nodes, connections: wf.connections ?? {}, settings };
 }
 
-async function upsert(file, remote) {
-  const wf = JSON.parse(readFileSync(join(dir, file), "utf8"));
+async function upsert(file, remote, credentials) {
+  const wf = JSON.parse(fillPlaceholders(readFileSync(join(dir, file), "utf8")));
   if (!wf.name || !Array.isArray(wf.nodes)) throw new Error('not an n8n workflow export (missing "name" or "nodes")');
+  remapCredentials(wf, credentials);
 
   const byName = remote.filter((r) => r.name === wf.name);
   let target = remote.find((r) => wf.id && r.id === wf.id);
@@ -110,11 +154,19 @@ try {
 }
 
 const results = [];
+let credentialsError = "";
 if (files.length) {
-  const remote = await listRemote();
+  const remote = await listAll("workflows");
+  // Only files whose nodes use credentials need this; a failure is reported per file.
+  let credentials = null;
+  try {
+    credentials = await listAll("credentials");
+  } catch (err) {
+    credentialsError = `listing credentials failed (API key needs the credential:list scope): ${err.message}`;
+  }
   for (const file of files) {
     try {
-      const r = await upsert(file, remote);
+      const r = await upsert(file, remote, credentials);
       results.push({ file, ok: true, ...r });
       console.log(`OK   ${file}: ${r.action} "${r.name}" (id ${r.id})${r.note ? ` - ${r.note}` : ""}`);
     } catch (err) {

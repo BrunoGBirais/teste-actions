@@ -43,3 +43,6 @@ jobs:
         env:
           N8N_API_URL: ${{ secrets.N8N_API_URL }}
           N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          # Fill the __SUPABASE_URL__ / __SUPABASE_ANON_KEY__ placeholders in workflows/.
+          N8N_VAR_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          N8N_VAR_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
