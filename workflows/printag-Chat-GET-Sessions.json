@@ -1,0 +1,172 @@
+{
+  "name": "printag-Chat-GET-Sessions",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "printag-sessions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0f1fd427-66d2-434b-b0a3-10161dcc7407",
+      "name": "When called - GET sessions",
+      "position": [
+        -112,
+        32
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "d433b917-387e-4aff-adeb-78cd81421956"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst authHeader = headers.authorization || headers.Authorization;\nif (!authHeader || !String(authHeader).toLowerCase().startsWith('bearer ')) {\n  throw new Error('UNAUTHORIZED: missing bearer token');\n}\nreturn { authHeader };"
+      },
+      "id": "11c7b623-91e2-4cf3-8065-368cb815b191",
+      "name": "Auth Guard",
+      "position": [
+        64,
+        32
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "__SUPABASE_URL__/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.authHeader }}"
+            },
+            {
+              "name": "apikey",
+              "value": "__SUPABASE_ANON_KEY__"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1f6ee01e-9521-4afe-b6e2-098373814695",
+      "name": "Validate JWT (Supabase)",
+      "position": [
+        256,
+        32
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const user = $input.first().json;\nconst userId = user && user.id;\nif (!userId) throw new Error('UNAUTHORIZED: invalid token');\nconst company = user && user.user_metadata && user.user_metadata.company_name;\nif (company !== 'printag') {\n  throw new Error('FORBIDDEN: user does not belong to printag');\n}\nreturn { userId, prefix: `u_${userId}__` };"
+      },
+      "id": "df5b3a3d-ad26-4ed6-a57d-42a9a0fa8f15",
+      "name": "Build Context",
+      "position": [
+        448,
+        32
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  session_id, \n  MIN(created_at) as data_inicio,\n  (SELECT message->>'content'\n   FROM printag_chat_message printag_cm2 \n   WHERE printag_cm2.session_id = printag_cm.session_id \n   AND printag_cm2.message->>'type' = 'human'\n   ORDER BY id DESC LIMIT 1) as titulo\nFROM printag_chat_message printag_cm\nWHERE session_id LIKE '{{ $json.prefix }}%'\nGROUP BY session_id\nORDER BY data_inicio DESC;",
+        "options": {}
+      },
+      "id": "6207aea7-b0d0-4af2-9d69-d5c2f7186287",
+      "name": "List Sessions from DB",
+      "position": [
+        640,
+        32
+      ],
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "credentials": {
+        "postgres": {
+          "name": "Supabase_database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "af334bfd-679d-4843-9417-01bf62a77007",
+      "name": "Return Sessions",
+      "position": [
+        832,
+        32
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1
+    }
+  ],
+  "connections": {
+    "When called - GET sessions": {
+      "main": [
+        [
+          {
+            "node": "Auth Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Guard": {
+      "main": [
+        [
+          {
+            "node": "Validate JWT (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate JWT (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "List Sessions from DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Sessions from DB": {
+      "main": [
+        [
+          {
+            "node": "Return Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}

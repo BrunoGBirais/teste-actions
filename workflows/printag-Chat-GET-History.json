@@ -1,0 +1,172 @@
+{
+  "name": "printag-Chat-GET-History",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "printag-history",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a023a935-9c16-4b32-92ac-45382393a2e2",
+      "name": "When called - GET history",
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "40010dce-b754-4779-8c5d-d2e32bc2dc91"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst authHeader = headers.authorization || headers.Authorization;\nif (!authHeader || !String(authHeader).toLowerCase().startsWith('bearer ')) {\n  throw new Error('UNAUTHORIZED: missing bearer token');\n}\nconst query = item.query || item.queryString || {};\nconst sessionId = query.sessionId;\nif (!sessionId) {\n  throw new Error('sessionId query parameter is required');\n}\nreturn { authHeader, sessionId };"
+      },
+      "id": "c09c9821-7686-466f-b227-d42d449d3c0b",
+      "name": "Auth Guard",
+      "position": [
+        176,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "__SUPABASE_URL__/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.authHeader }}"
+            },
+            {
+              "name": "apikey",
+              "value": "__SUPABASE_ANON_KEY__"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fa70c749-dccf-4e60-b5e6-fdbb076b1aca",
+      "name": "Validate JWT (Supabase)",
+      "position": [
+        368,
+        0
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const user = $input.first().json;\nconst auth = $('Auth Guard').first().json;\nconst userId = user && user.id;\nif (!userId) throw new Error('UNAUTHORIZED: invalid token');\nconst company = user && user.user_metadata && user.user_metadata.company_name;\nif (company !== 'printag') {\n  throw new Error('FORBIDDEN: user does not belong to printag');\n}\nconst prefix = `u_${userId}__`;\nconst sessionId = auth.sessionId;\nif (!String(sessionId).startsWith(prefix)) {\n  throw new Error('FORBIDDEN: session belongs to another user');\n}\nreturn { userId, prefix, sessionId };"
+      },
+      "id": "d3877cbe-6acd-48e2-836f-659b8e3678cd",
+      "name": "Build Context",
+      "position": [
+        560,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * \nFROM printag_chat_message \nWHERE session_id = '{{ $json.sessionId }}' \nORDER BY id ASC;",
+        "options": {}
+      },
+      "id": "466c5244-12c7-42e5-9502-c9730c20d9fd",
+      "name": "Get History from DB",
+      "position": [
+        752,
+        0
+      ],
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "credentials": {
+        "postgres": {
+          "name": "Supabase_database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "4c8367df-f7f8-4a6f-82d2-98586675674f",
+      "name": "Return History",
+      "position": [
+        944,
+        0
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1
+    }
+  ],
+  "connections": {
+    "When called - GET history": {
+      "main": [
+        [
+          {
+            "node": "Auth Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Guard": {
+      "main": [
+        [
+          {
+            "node": "Validate JWT (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate JWT (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Get History from DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get History from DB": {
+      "main": [
+        [
+          {
+            "node": "Return History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}

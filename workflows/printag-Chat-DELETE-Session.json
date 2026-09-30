@@ -1,0 +1,174 @@
+{
+  "name": "printag-Chat-DELETE-Session",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "DELETE",
+        "path": "printag-session",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3b14f6cd-57a2-4aff-b7d9-1292eda0775f",
+      "name": "When called - DELETE session",
+      "position": [
+        -176,
+        -16
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "a2450955-99fe-4f55-b057-1894f0fca81f"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst authHeader = headers.authorization || headers.Authorization;\nif (!authHeader || !String(authHeader).toLowerCase().startsWith('bearer ')) {\n  throw new Error('UNAUTHORIZED: missing bearer token');\n}\nconst query = item.query || item.queryString || {};\nconst sessionId = query.sessionId;\nif (!sessionId) {\n  throw new Error('sessionId query parameter is required');\n}\nreturn { authHeader, sessionId };"
+      },
+      "id": "d1aebcdd-3663-4fdd-9438-29a4486851b9",
+      "name": "Auth Guard",
+      "position": [
+        0,
+        -16
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "__SUPABASE_URL__/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.authHeader }}"
+            },
+            {
+              "name": "apikey",
+              "value": "__SUPABASE_ANON_KEY__"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6b5e44b3-0a72-4a60-91b6-e806275c2e22",
+      "name": "Validate JWT (Supabase)",
+      "position": [
+        192,
+        -16
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const user = $input.first().json;\nconst auth = $('Auth Guard').first().json;\nconst userId = user && user.id;\nif (!userId) throw new Error('UNAUTHORIZED: invalid token');\nconst company = user && user.user_metadata && user.user_metadata.company_name;\nif (company !== 'printag') {\n  throw new Error('FORBIDDEN: user does not belong to printag');\n}\nconst prefix = `u_${userId}__`;\nconst sessionId = auth.sessionId;\nif (!String(sessionId).startsWith(prefix)) {\n  throw new Error('FORBIDDEN: session belongs to another user');\n}\nreturn { userId, prefix, sessionId };"
+      },
+      "id": "e4fb3171-f497-4a36-9d6e-1cbbc07886d7",
+      "name": "Build Context",
+      "position": [
+        384,
+        -16
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM printag_chat_message WHERE session_id = '{{ $json.sessionId }}'",
+        "options": {}
+      },
+      "id": "c8c6c43c-6116-4c74-a4a0-b81d6b321ad7",
+      "name": "Delete Session from DB",
+      "position": [
+        576,
+        -16
+      ],
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "credentials": {
+        "postgres": {
+          "name": "Supabase_database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Session deleted successfully' }) }}",
+        "options": {}
+      },
+      "id": "89f32d59-3e29-4619-85ab-6892d9e592e4",
+      "name": "Return Success",
+      "position": [
+        768,
+        -16
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1
+    }
+  ],
+  "connections": {
+    "When called - DELETE session": {
+      "main": [
+        [
+          {
+            "node": "Auth Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Guard": {
+      "main": [
+        [
+          {
+            "node": "Validate JWT (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate JWT (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Delete Session from DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Session from DB": {
+      "main": [
+        [
+          {
+            "node": "Return Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}
