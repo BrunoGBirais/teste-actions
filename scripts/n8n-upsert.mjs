@@ -87,14 +87,16 @@ async function upsert(file, remote) {
     remote.push(result);
   }
 
+  // Publishes on every deploy, even if already active: on n8n versions with
+  // draft/published versions, a PUT only saves a draft until activate is called.
   // Only ever activates; a workflow is never switched off by a deploy.
   let note = "";
-  if (wf.active === true && !result.active) {
+  if (wf.active === true) {
     try {
       await api("POST", `/workflows/${result.id}/activate`);
-      note = "activated";
+      note = "published";
     } catch (err) {
-      note = `saved, but activation failed: ${err.message}`;
+      throw new Error(`saved, but publishing failed: ${err.message}`);
     }
   }
   return { action: target ? "updated" : "created", id: result.id, name: wf.name, note };

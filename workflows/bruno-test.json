@@ -2,12 +2,18 @@
   "name": "Bruno Test (deploy pipeline)",
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "bruno-test-deploy",
+        "responseMode": "lastNode",
+        "options": {}
+      },
       "id": "7b1c2f3e-1a2b-4c3d-8e9f-000000000001",
-      "name": "When clicking 'Test workflow'",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [0, 0]
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "7b1c2f3e-1a2b-4c3d-8e9f-0000000000aa"
     },
     {
       "parameters": {
@@ -37,7 +43,7 @@
     }
   ],
   "connections": {
-    "When clicking 'Test workflow'": {
+    "Webhook": {
       "main": [
         [
           {
@@ -52,5 +58,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "active": false
+  "active": true
 }
