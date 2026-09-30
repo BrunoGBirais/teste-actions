@@ -1,0 +1,56 @@
+{
+  "name": "Bruno Test (deploy pipeline)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "7b1c2f3e-1a2b-4c3d-8e9f-000000000001",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7b1c2f3e-1a2b-4c3d-8e9f-000000000003",
+              "name": "message",
+              "value": "Deployed by GitHub Actions",
+              "type": "string"
+            },
+            {
+              "id": "7b1c2f3e-1a2b-4c3d-8e9f-000000000004",
+              "name": "ranAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7b1c2f3e-1a2b-4c3d-8e9f-000000000002",
+      "name": "Set message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "Set message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
