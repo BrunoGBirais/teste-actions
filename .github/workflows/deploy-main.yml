@@ -1,0 +1,51 @@
+name: Deploy · production
+
+# Runs when a PR into main is merged (not when it is approved or closed unmerged):
+# applies pending migrations to the PROD Supabase project, then deploys the n8n
+# workflows to the PROD instance on Oracle Cloud.
+# To require a human approval before this job, set "Required reviewers" on the
+# production environment (Settings > Environments > production).
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      # Check out the merge commit on main, not the PR's head branch.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Supabase migrations
+        run: bash scripts/supabase-migrate.sh
+        env:
+          # supabase.com: Session pooler URL (the direct URL is IPv6-only, which
+          # GitHub-hosted runners can't reach).
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      # Skipped when a migration fails: workflows may depend on the new schema.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: n8n workflows
+        run: node scripts/n8n-upsert.mjs
+        env:
+          N8N_API_URL: ${{ secrets.N8N_API_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}

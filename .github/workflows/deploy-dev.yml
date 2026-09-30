@@ -1,0 +1,45 @@
+name: Deploy · dev
+
+# Every push to dev applies pending migrations to the DEV Supabase project and
+# then deploys the n8n workflows to the DEV instance.
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+# Two runs at once would fight over the migration history table.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Selects which set of secrets the job sees. This is what keeps dev changes
+    # away from production: the same secret names hold different values per environment.
+    environment: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Supabase migrations
+        run: bash scripts/supabase-migrate.sh
+        env:
+          # Self-hosted Supabase on Cloudfy: direct Postgres connection string.
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      # Skipped when a migration fails: workflows may depend on the new schema.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: n8n workflows
+        run: node scripts/n8n-upsert.mjs
+        env:
+          N8N_API_URL: ${{ secrets.N8N_API_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
