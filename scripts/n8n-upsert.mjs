@@ -15,7 +15,9 @@
 // Credentials: exported node credentials carry the source instance's ids. Each
 // one is re-pointed to the credential with the same name and type on the target
 // instance, so credentials only need to exist there with matching names. This
-// needs the credential:list API scope.
+// needs the credential:list API scope. A credential missing on the target does
+// not fail the file: its reference is removed from the node, the workflow is
+// still imported but left unpublished, and the report lists what to create.
 //
 // Errors: one bad file does not stop the others. Every file is attempted, the
 // report lists each result, and the script exits 1 if any file failed.
@@ -92,17 +94,24 @@ function fillPlaceholders(text) {
 
 // Re-points each node credential to the target instance's credential with the
 // same type and name. `credentials` is null when the instance can't list them.
+// Unmatched references are removed from their node and returned, so the
+// workflow can still be imported; the credential is then set in the n8n editor.
 function remapCredentials(wf, credentials) {
   const missing = [];
   for (const node of wf.nodes) {
     for (const [type, ref] of Object.entries(node.credentials ?? {})) {
       if (!credentials) throw new Error(`can't map credentials: ${credentialsError}`);
       const match = credentials.filter((c) => c.type === type && c.name === ref.name);
-      if (match.length === 1) node.credentials[type] = { id: match[0].id, name: match[0].name };
-      else missing.push(`"${ref.name}" (${type})${match.length > 1 ? ": more than one with this name" : ""}`);
+      if (match.length === 1) {
+        node.credentials[type] = { id: match[0].id, name: match[0].name };
+      } else {
+        delete node.credentials[type];
+        missing.push(`"${ref.name}" (${type})${match.length > 1 ? ": more than one with this name" : ""}`);
+      }
     }
+    if (node.credentials && !Object.keys(node.credentials).length) delete node.credentials;
   }
-  if (missing.length) throw new Error(`credentials missing on this instance: ${[...new Set(missing)].join(", ")}`);
+  return [...new Set(missing)];
 }
 
 function toPayload(wf) {
@@ -114,7 +123,7 @@ function toPayload(wf) {
 async function upsert(file, remote, credentials) {
   const wf = JSON.parse(fillPlaceholders(readFileSync(join(dir, file), "utf8")));
   if (!wf.name || !Array.isArray(wf.nodes)) throw new Error('not an n8n workflow export (missing "name" or "nodes")');
-  remapCredentials(wf, credentials);
+  const missingCreds = remapCredentials(wf, credentials);
 
   const byName = remote.filter((r) => r.name === wf.name);
   let target = remote.find((r) => wf.id && r.id === wf.id);
@@ -133,9 +142,12 @@ async function upsert(file, remote, credentials) {
 
   // Publishes on every deploy, even if already active: on n8n versions with
   // draft/published versions, a PUT only saves a draft until activate is called.
-  // Only ever activates; a workflow is never switched off by a deploy.
+  // Only ever activates; a workflow is never switched off by a deploy. A
+  // workflow with missing credentials is not published, since n8n would reject it.
   let note = "";
-  if (wf.active === true) {
+  if (missingCreds.length) {
+    note = `not published, create credentials: ${missingCreds.join(", ")}`;
+  } else if (wf.active === true) {
     try {
       await api("POST", `/workflows/${result.id}/activate`);
       note = "published";
@@ -143,7 +155,7 @@ async function upsert(file, remote, credentials) {
       throw new Error(`saved, but publishing failed: ${err.message}`);
     }
   }
-  return { action: target ? "updated" : "created", id: result.id, name: wf.name, note };
+  return { action: target ? "updated" : "created", id: result.id, name: wf.name, note, warn: missingCreds.length > 0 };
 }
 
 let files;
@@ -169,6 +181,7 @@ if (files.length) {
       const r = await upsert(file, remote, credentials);
       results.push({ file, ok: true, ...r });
       console.log(`OK   ${file}: ${r.action} "${r.name}" (id ${r.id})${r.note ? ` - ${r.note}` : ""}`);
+      if (r.warn) console.log(`::warning file=${dir}/${file}::${r.note}`);
     } catch (err) {
       results.push({ file, ok: false, error: err.message });
       console.error(`::error file=${dir}/${file}::${err.message}`);
