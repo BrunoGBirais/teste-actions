@@ -1,6 +1,8 @@
 // Per-environment values come from NEXT_PUBLIC_* env vars (see .env.example).
 // Next.js inlines them at build time, so they must be referenced literally.
-export const API_BASE = process.env.NEXT_PUBLIC_N8N_WEBHOOK_BASE ?? "";
+// n8n webhooks are called on this site's own origin and proxied to the
+// environment's n8n by the rewrite in next.config.ts (N8N_WEBHOOK_ORIGIN).
+export const API_BASE = "/n8n";
 export const CHAT_URL = `${API_BASE}/printag-AgentRag`;
 export const UPLOAD_URL = `${API_BASE}/printag-index-drive`;
 export const UPLOAD_DATASET_URL = `${API_BASE}/printag-upload-dataset`;
