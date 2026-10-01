@@ -19,6 +19,12 @@
 // not fail the file: its reference is removed from the node, the workflow is
 // still imported but left unpublished, and the report lists what to create.
 //
+// Sub-workflows: a node that calls another workflow (Execute Workflow, Call
+// Workflow tool) stores the source instance's id plus the workflow's name in
+// "cachedResultName". The id is re-pointed to the workflow with that name on
+// the target. Files with such references are deployed after the others, so a
+// sub-workflow created in the same run is found.
+//
 // Errors: one bad file does not stop the others. Every file is attempted, the
 // report lists each result, and the script exits 1 if any file failed.
 import { appendFileSync, readdirSync, readFileSync } from "node:fs";
@@ -114,6 +120,27 @@ function remapCredentials(wf, credentials) {
   return [...new Set(missing)];
 }
 
+// Re-points every workflowId reference to the target workflow with the same
+// name. Throws when the name is missing or ambiguous on the target.
+function remapSubworkflows(wf, remote) {
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    if (value.workflowId?.__rl && value.workflowId.cachedResultName) {
+      const ref = value.workflowId;
+      const match = remote.filter((r) => r.name === ref.cachedResultName);
+      if (match.length !== 1) {
+        throw new Error(`sub-workflow "${ref.cachedResultName}" ${match.length ? "exists more than once" : "not found"} on this instance`);
+      }
+      ref.value = match[0].id;
+      if (ref.cachedResultUrl) ref.cachedResultUrl = `/workflow/${match[0].id}`;
+    }
+    for (const child of Object.values(value)) visit(child);
+  };
+  for (const node of wf.nodes) visit(node.parameters);
+}
+
+const hasSubworkflowRef = (file) => /"workflowId"\s*:\s*\{/.test(readFileSync(join(dir, file), "utf8"));
+
 function toPayload(wf) {
   const settings = {};
   for (const key of SETTINGS_KEYS) if (wf.settings?.[key] !== undefined) settings[key] = wf.settings[key];
@@ -124,6 +151,7 @@ async function upsert(file, remote, credentials) {
   const wf = JSON.parse(fillPlaceholders(readFileSync(join(dir, file), "utf8")));
   if (!wf.name || !Array.isArray(wf.nodes)) throw new Error('not an n8n workflow export (missing "name" or "nodes")');
   const missingCreds = remapCredentials(wf, credentials);
+  remapSubworkflows(wf, remote);
 
   const byName = remote.filter((r) => r.name === wf.name);
   let target = remote.find((r) => wf.id && r.id === wf.id);
@@ -161,6 +189,8 @@ async function upsert(file, remote, credentials) {
 let files;
 try {
   files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".json")).sort();
+  // Callers go last so the workflows they call already exist on the target.
+  files = [...files.filter((f) => !hasSubworkflowRef(f)), ...files.filter(hasSubworkflowRef)];
 } catch {
   files = [];
 }
